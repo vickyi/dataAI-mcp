@@ -1,0 +1,11 @@
+# 创建项目目录
+mkdir sql-linter-mcp-server
+cd sql-linter-mcp-server
+
+# 创建虚拟环境
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# venv\Scripts\activate  # Windows
+
+# 安装依赖
+pip install mcp pandas sqlglot # 使用sqlglot进行SQL语法解析
