@@ -12,9 +12,7 @@ async def main():
     # 启动MCP服务器（在实际中，这应该是一个独立的进程）
     # 这里我们假设MCP服务器已经在运行
 
-    path_to_mcp_server = "python3 /c/Users/admin/Documents/Develop/dataAI-mcp/server.py"
-
-    agent = SQLAssistantAgent(deepseek_api_key="dummy-key-for-testing")
+    agent: SQLAssistantAgent = SQLAssistantAgent(deepseek_api_key="dummy-key-for-testing")
 
     # 测试用例
     test_requests = [

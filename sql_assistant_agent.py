@@ -49,7 +49,7 @@ class SQLAssistantAgent:
 
         生成SQL时请遵循以下约定：
         - 使用Hive SQL语法
-        - 表名格式：ods_*, dwd_*, dws_*, ads_*
+        - 表名格式：ods_*, dwd_*, dws_*, app_*
         - 分区字段使用 dt，格式为 'yyyy-MM-dd'
         - 字段命名使用蛇形命名法（snake_case）
 

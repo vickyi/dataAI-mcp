@@ -2,9 +2,35 @@ from mcp.server import FastMCP
 import sqlglot
 from sqlglot import exp
 import re
+import toml
+import os
+from typing import List, Dict, Any
 
 # Create FastMCP instance
 app = FastMCP("sql-linter-mcp-server")
+
+# Load rules from TOML configuration
+def load_rules_config() -> Dict[str, Any]:
+    """Load SQL rules configuration from TOML file"""
+    config_path = os.path.join(os.path.dirname(__file__), 'sql_rules.toml')
+    if os.path.exists(config_path):
+        with open(config_path, 'r', encoding='utf-8') as f:
+            return toml.load(f)
+    else:
+        # Return default configuration if file doesn't exist
+        return {
+            "rules": {
+                "select_star": {"enabled": True, "level": "error", "exclude_functions": ["COUNT"]},
+                "partition_filter": {"enabled": True, "level": "error", "partition_fields": ["dt", "date"]},
+                "table_alias": {"enabled": True, "level": "warning"},
+                "sensitive_columns": {"enabled": True, "level": "error", "sensitive_keywords": [
+                    "phone", "email", "id_card", "password", "credit_card"]},
+                "field_alias_naming": {"enabled": True, "level": "warning"}
+            }
+        }
+
+# Load the rules configuration
+RULES_CONFIG = load_rules_config()
 
 @app.tool()
 async def lint_sql(sql_string: str) -> str:
@@ -17,18 +43,29 @@ async def lint_sql(sql_string: str) -> str:
     Returns:
         包含所有检查问题和建议的格式化字符串
     """
-    # Initialize rules
-    rules = [
-        _check_select_star,
-        _check_partition_filter,
-        _check_table_alias,
-        _check_sensitive_columns,
-        _check_field_alias_naming
-    ]
+    # Initialize rules based on configuration
+    rules = []
+
+    if RULES_CONFIG["rules"].get("select_star", {}).get("enabled", True):
+        rules.append(_check_select_star)
+    if RULES_CONFIG["rules"].get("partition_filter", {}).get("enabled", True):
+        rules.append(_check_partition_filter)
+    if RULES_CONFIG["rules"].get("table_alias", {}).get("enabled", True):
+        rules.append(_check_table_alias)
+    if RULES_CONFIG["rules"].get("sensitive_columns", {}).get("enabled", True):
+        rules.append(_check_sensitive_columns)
+    if RULES_CONFIG["rules"].get("field_alias_naming", {}).get("enabled", True):
+        rules.append(_check_field_alias_naming)
+    if RULES_CONFIG["rules"].get("join_conditions", {}).get("enabled", False):
+        rules.append(_check_join_conditions)
+    if RULES_CONFIG["rules"].get("query_complexity", {}).get("enabled", False):
+        rules.append(_check_query_complexity)
 
     try:
         # 1. 使用sqlglot解析SQL
-        parsed_sql = sqlglot.parse_one(sql_string, read='hive') # 假设是Hive SQL
+        # Get SQL dialect from config, default to hive
+        dialect = RULES_CONFIG.get("general", {}).get("sql_dialect", "hive")
+        parsed_sql = sqlglot.parse_one(sql_string, read=dialect)
     except Exception as e:
         return f"SQL解析失败: {str(e)}"
 
@@ -51,56 +88,147 @@ async def lint_sql(sql_string: str) -> str:
 def _check_select_star(parsed_sql, original_sql):
     """检查是否使用 SELECT * """
     issues = []
+    # Get configuration for this rule
+    rule_config = RULES_CONFIG["rules"].get("select_star", {})
+    exclude_functions = rule_config.get("exclude_functions", ["COUNT"])
+
     for select in parsed_sql.find_all(exp.Star):
         # 排除 COUNT(*) 的情况
-        if not isinstance(select.parent, exp.Count):
-            issues.append("[Error-R001] 禁止使用 SELECT *，请明确列出所需字段。")
+        if not any(isinstance(select.parent, getattr(exp, func, type(None))) for func in exclude_functions):
+            level = rule_config.get("level", "error")
+            message = rule_config.get("message", "禁止使用 SELECT *，请明确列出所需字段。")
+            issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R001')}] {message}")
             break
     return issues
 
 def _check_partition_filter(parsed_sql, original_sql):
     """检查是否包含分区字段过滤"""
     issues = []
-    # 这是一个简化版的检查，实际中可能需要更复杂的逻辑
+    # Get configuration for this rule
+    rule_config = RULES_CONFIG["rules"].get("partition_filter", {})
+    partition_fields = rule_config.get("partition_fields", ["dt", "date"])
+    require_where_clause = rule_config.get("require_where_clause", True)
+
     where_clause = parsed_sql.find(exp.Where)
     if where_clause:
         where_str = where_clause.sql().lower()
-        # 检查是否存在对 dt 分区的过滤
-        if 'dt' not in where_str and 'date' not in where_str:
-            issues.append("[Error-R101] 查询必须包含分区字段 'dt' 的过滤条件，以避免全表扫描。")
-    else:
-        issues.append("[Error-R101] 查询缺少 WHERE 子句，必须包含分区字段过滤。")
+        # 检查是否存在对分区字段的过滤
+        if not any(field in where_str for field in partition_fields):
+            level = rule_config.get("level", "error")
+            message = rule_config.get("description", "查询必须包含分区字段过滤条件，以避免全表扫描。")
+            issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R101')}] {message}")
+    elif require_where_clause:
+        level = rule_config.get("level", "error")
+        message = rule_config.get("description", "查询缺少 WHERE 子句，必须包含分区字段过滤。")
+        issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R101')}] {message}")
     return issues
 
 def _check_table_alias(parsed_sql, original_sql):
     """检查表是否使用了别名"""
     issues = []
+    # Get configuration for this rule
+    rule_config = RULES_CONFIG["rules"].get("table_alias", {})
+
     for table in parsed_sql.find_all(exp.Table):
         if not table.alias:
-            issues.append(f"[Warning-R002] 建议为表 '{table.name}' 使用别名。")
+            level = rule_config.get("level", "warning")
+            message = rule_config.get("description", f"建议为表 '{table.name}' 使用别名。")
+            issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R002')}] {message}")
     return issues
 
 def _check_sensitive_columns(parsed_sql, original_sql):
     """检查敏感字段"""
-    sensitive_keywords = ['phone', 'email', 'id_card', 'password', 'credit_card']
     issues = []
+    # Get configuration for this rule
+    rule_config = RULES_CONFIG["rules"].get("sensitive_columns", {})
+    sensitive_keywords = rule_config.get("sensitive_keywords", [
+        'phone', 'email', 'id_card', 'password', 'credit_card'
+    ])
+
     for column in parsed_sql.find_all(exp.Column):
         col_name = column.sql().lower()
         for keyword in sensitive_keywords:
             if keyword in col_name:
-                issues.append(f"[Error-R301] 查询中包含敏感字段 '{column.sql()}'，请确认是否有权限访问并已进行脱敏处理。")
+                level = rule_config.get("level", "error")
+                message = rule_config.get("description", f"查询中包含敏感字段 '{column.sql()}'，请确认是否有权限访问并已进行脱敏处理。")
+                issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R301')}] {message}")
                 break
     return issues
 
 def _check_field_alias_naming(parsed_sql, original_sql):
     """检查字段别名命名规范"""
     issues = []
+    # Get configuration for this rule
+    rule_config = RULES_CONFIG["rules"].get("field_alias_naming", {})
+
     aliases = parsed_sql.find_all(exp.Alias)
     for alias in aliases:
         alias_name = alias.alias
         # 检查是否是驼峰命名，应改为下划线
         if re.match(r'^[a-z]+[A-Z][a-z]*', alias_name):
-            issues.append(f"[Warning-R201] 字段别名 '{alias_name}' 建议改为下划线形式 '{_camel_to_snake(alias_name)}'。")
+            level = rule_config.get("level", "warning")
+            snake_name = re.sub(r'(?<!^)(?=[A-Z])', '_', alias_name).lower()
+            message = rule_config.get("description", f"字段别名 '{alias_name}' 建议改为下划线形式 '{snake_name}'。")
+            issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R201')}] {message}")
+    return issues
+
+def _check_join_conditions(parsed_sql, original_sql):
+    """检查JOIN条件"""
+    issues = []
+    # Get configuration for this rule
+    rule_config = RULES_CONFIG["rules"].get("join_conditions", {})
+
+    # Find all JOIN expressions
+    joins = list(parsed_sql.find_all(exp.Join))
+    for join in joins:
+        # Check if join is a CROSS JOIN or has no ON condition
+        # For CROSS JOIN, the kind attribute will be 'CROSS'
+        if hasattr(join, 'kind') and join.kind == 'CROSS':
+            level = rule_config.get("level", "warning")
+            message = rule_config.get("description", "CROSS JOIN可能导致笛卡尔积，请谨慎使用。")
+            issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R401')}] {message}")
+        else:
+            # For regular JOINs, check if there's an ON condition
+            # The on attribute is a method, so we need to call it
+            on_condition = join.on()
+            # If there's no ON condition or it's a trivial condition like TRUE
+            if not on_condition or (isinstance(on_condition, exp.Boolean) and on_condition.this is True):
+                level = rule_config.get("level", "warning")
+                message = rule_config.get("description", "JOIN语句应该包含明确的连接条件，避免笛卡尔积。")
+                issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R401')}] {message}")
+    return issues
+
+def _check_query_complexity(parsed_sql, original_sql):
+    """检查查询复杂度"""
+    issues = []
+    # Get configuration for this rule
+    rule_config = RULES_CONFIG["rules"].get("query_complexity", {})
+
+    max_joins = rule_config.get("max_joins", 5)
+    max_subqueries = rule_config.get("max_subqueries", 3)
+    max_tables = rule_config.get("max_tables", 10)
+
+    # Count JOINs
+    join_count = len(list(parsed_sql.find_all(exp.Join)))
+    if join_count > max_joins:
+        level = rule_config.get("level", "warning")
+        message = rule_config.get("description", f"查询包含 {join_count} 个JOIN，超过最大限制 {max_joins}。")
+        issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R501')}] {message}")
+
+    # Count subqueries
+    subquery_count = len(list(parsed_sql.find_all(exp.Subquery)))
+    if subquery_count > max_subqueries:
+        level = rule_config.get("level", "warning")
+        message = rule_config.get("description", f"查询包含 {subquery_count} 个子查询，超过最大限制 {max_subqueries}。")
+        issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R501')}] {message}")
+
+    # Count tables
+    table_count = len(list(parsed_sql.find_all(exp.Table)))
+    if table_count > max_tables:
+        level = rule_config.get("level", "warning")
+        message = rule_config.get("description", f"查询涉及 {table_count} 个表，超过最大限制 {max_tables}。")
+        issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R501')}] {message}")
+
     return issues
 
 def _camel_to_snake(name):
