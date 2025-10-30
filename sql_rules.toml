@@ -45,7 +45,15 @@ sensitive_keywords = [
     "credit_card",
     "ssn",
     "bank_account",
-    "salary"
+    "money",
+    "salary",
+    "phone_encrypt",
+    "encrypt_phone",
+    "identity_number_encrypt",
+    "cred_id_encrypted",
+    "cred_id",
+    "account",
+    "drive_license_no"
 ]
 
 [rules.field_alias_naming]
@@ -91,7 +99,7 @@ description = "Hive建表语句关键字应使用小写"
 keywords = [
     "CREATE", "TABLE", "EXTERNAL", "PARTITIONED", "STORED", "LOCATION",
     "ROW", "FORMAT", "FIELDS", "TERMINATED", "COLLECTION", "ITEMS",
-    "KEYS", "LINES", "TBLPROPERTIES"
+    "KEYS", "LINES", "TBLPROPERTIES", "DROP", "ALTER", "TRUNCATE"
 ]
 
 [rules.hive_ddl_alignment]

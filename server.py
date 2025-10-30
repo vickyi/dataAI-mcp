@@ -43,30 +43,6 @@ async def lint_sql(sql_string: str) -> str:
     Returns:
         包含所有检查问题和建议的格式化字符串
     """
-    # Initialize rules based on configuration
-    rules = []
-
-    if RULES_CONFIG["rules"].get("select_star", {}).get("enabled", True):
-        rules.append(_check_select_star)
-    if RULES_CONFIG["rules"].get("partition_filter", {}).get("enabled", True):
-        rules.append(_check_partition_filter)
-    if RULES_CONFIG["rules"].get("table_alias", {}).get("enabled", True):
-        rules.append(_check_table_alias)
-    if RULES_CONFIG["rules"].get("sensitive_columns", {}).get("enabled", True):
-        rules.append(_check_sensitive_columns)
-    if RULES_CONFIG["rules"].get("field_alias_naming", {}).get("enabled", True):
-        rules.append(_check_field_alias_naming)
-    if RULES_CONFIG["rules"].get("join_conditions", {}).get("enabled", False):
-        rules.append(_check_join_conditions)
-    if RULES_CONFIG["rules"].get("query_complexity", {}).get("enabled", False):
-        rules.append(_check_query_complexity)
-    if RULES_CONFIG["rules"].get("hive_ddl_keywords", {}).get("enabled", True):
-        rules.append(_check_hive_ddl_keywords)
-    if RULES_CONFIG["rules"].get("hive_ddl_alignment", {}).get("enabled", True):
-        rules.append(_check_hive_ddl_alignment)
-    if RULES_CONFIG["rules"].get("hive_external_table", {}).get("enabled", True):
-        rules.append(_check_hive_external_table)
-
     try:
         # 1. 使用sqlglot解析SQL
         # Get SQL dialect from config, default to hive
@@ -75,14 +51,36 @@ async def lint_sql(sql_string: str) -> str:
     except Exception as e:
         return f"SQL解析失败: {str(e)}"
 
+    # 2. Determine if this is a DDL statement
+    is_ddl = isinstance(parsed_sql, (exp.Create, exp.Drop, exp.Alter, exp.TruncateTable))
+
+    # 3. Initialize rules based on statement type and configuration
+    rules = []
+
+    if is_ddl:
+        # For DDL statements, apply DDL-specific rules
+        rules.append(_check_ddl_rules)
+    else:
+        # For query statements, apply configured query rules
+        if RULES_CONFIG["rules"].get("select_star", {}).get("enabled", True):
+            rules.append(_check_select_star)
+        if RULES_CONFIG["rules"].get("partition_filter", {}).get("enabled", True):
+            rules.append(_check_partition_filter)
+        if RULES_CONFIG["rules"].get("table_alias", {}).get("enabled", True):
+            rules.append(_check_table_alias)
+        if RULES_CONFIG["rules"].get("sensitive_columns", {}).get("enabled", True):
+            rules.append(_check_sensitive_columns)
+        if RULES_CONFIG["rules"].get("field_alias_naming", {}).get("enabled", True):
+            rules.append(_check_field_alias_naming)
+
     issues = []
 
-    # 2. 应用所有规则进行检查
+    # 4. 应用所有规则进行检查
     for rule_func in rules:
         rule_issues = rule_func(parsed_sql, sql_string)
         issues.extend(rule_issues)
 
-    # 3. 格式化输出结果
+    # 5. 格式化输出结果
     if not issues:
         return "✅ SQL符合所有规范！"
     else:
@@ -178,131 +176,53 @@ def _check_field_alias_naming(parsed_sql, original_sql):
             issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R201')}] {message}")
     return issues
 
-def _check_join_conditions(parsed_sql, original_sql):
-    """检查JOIN条件"""
+def _check_ddl_rules(parsed_sql, original_sql):
+    """检查DDL语句的规则"""
     issues = []
-    # Get configuration for this rule
-    rule_config = RULES_CONFIG["rules"].get("join_conditions", {})
 
-    # Find all JOIN expressions
-    joins = list(parsed_sql.find_all(exp.Join))
-    for join in joins:
-        # Check if join is a CROSS JOIN or has no ON condition
-        # For CROSS JOIN, the kind attribute will be 'CROSS'
-        if hasattr(join, 'kind') and join.kind == 'CROSS':
-            level = rule_config.get("level", "warning")
-            message = rule_config.get("description", "CROSS JOIN可能导致笛卡尔积，请谨慎使用。")
-            issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R401')}] {message}")
-        else:
-            # For regular JOINs, check if there's an ON condition
-            # The on attribute is a method, so we need to call it
-            on_condition = join.on()
-            # If there's no ON condition or it's a trivial condition like TRUE
-            if not on_condition or (isinstance(on_condition, exp.Boolean) and on_condition.this is True):
-                level = rule_config.get("level", "warning")
-                message = rule_config.get("description", "JOIN语句应该包含明确的连接条件，避免笛卡尔积。")
-                issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R401')}] {message}")
-    return issues
+    # Get configuration for DDL rules
+    hive_external_rule = RULES_CONFIG["rules"].get("hive_external_table", {})
+    hive_keyword_rule = RULES_CONFIG["rules"].get("hive_ddl_keywords", {})
+    hive_alignment_rule = RULES_CONFIG["rules"].get("hive_ddl_alignment", {})
 
-def _check_query_complexity(parsed_sql, original_sql):
-    """检查查询复杂度"""
-    issues = []
-    # Get configuration for this rule
-    rule_config = RULES_CONFIG["rules"].get("query_complexity", {})
-
-    max_joins = rule_config.get("max_joins", 5)
-    max_subqueries = rule_config.get("max_subqueries", 3)
-    max_tables = rule_config.get("max_tables", 10)
-
-    # Count JOINs
-    join_count = len(list(parsed_sql.find_all(exp.Join)))
-    if join_count > max_joins:
-        level = rule_config.get("level", "warning")
-        message = rule_config.get("description", f"查询包含 {join_count} 个JOIN，超过最大限制 {max_joins}。")
-        issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R501')}] {message}")
-
-    # Count subqueries
-    subquery_count = len(list(parsed_sql.find_all(exp.Subquery)))
-    if subquery_count > max_subqueries:
-        level = rule_config.get("level", "warning")
-        message = rule_config.get("description", f"查询包含 {subquery_count} 个子查询，超过最大限制 {max_subqueries}。")
-        issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R501')}] {message}")
-
-    # Count tables
-    table_count = len(list(parsed_sql.find_all(exp.Table)))
-    if table_count > max_tables:
-        level = rule_config.get("level", "warning")
-        message = rule_config.get("description", f"查询涉及 {table_count} 个表，超过最大限制 {max_tables}。")
-        issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R501')}] {message}")
-
-    return issues
-
-def _check_hive_ddl_keywords(parsed_sql, original_sql):
-    """检查Hive DDL关键字规范（小写）"""
-    issues = []
-    # Get configuration for this rule
-    rule_config = RULES_CONFIG["rules"].get("hive_ddl_keywords", {})
-
-    # Check if this is a CREATE statement
-    if isinstance(parsed_sql, exp.Create):
-        # Get the keywords that should be lowercase
-        keywords = rule_config.get("keywords", [
-            "CREATE", "TABLE", "EXTERNAL", "PARTITIONED", "STORED", "LOCATION",
-            "ROW", "FORMAT", "FIELDS", "TERMINATED", "COLLECTION", "ITEMS",
-            "KEYS", "LINES", "TBLPROPERTIES"
-        ])
-
-        # Check the original SQL for uppercase keywords
-        for keyword in keywords:
-            # Look for uppercase versions of the keywords that are not properly quoted
-            # We use word boundaries to avoid false positives
-            pattern = r'\b' + keyword + r'\b'
-            if re.search(pattern, original_sql):
-                level = rule_config.get("level", "warning")
-                message = rule_config.get("description", f"Hive DDL关键字 '{keyword}' 应使用小写")
-                issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R701')}] {message}")
-
-    return issues
-
-def _check_hive_ddl_alignment(parsed_sql, original_sql):
-    """检查Hive DDL关键字对齐"""
-    issues = []
-    # Get configuration for this rule
-    rule_config = RULES_CONFIG["rules"].get("hive_ddl_alignment", {})
-
-    # Check if this is a CREATE statement
-    if isinstance(parsed_sql, exp.Create):
-        # Get the required alignment spaces
-        alignment_spaces = rule_config.get("alignment_spaces", 4)
-
-        # Simple check for alignment by looking at common patterns
-        lines = original_sql.split('\n')
-        for line in lines:
-            # Check if line starts with a keyword that should be aligned
-            if line.strip().upper().startswith(('PARTITIONED', 'STORED', 'LOCATION', 'TBLPROPERTIES')):
-                # Check if it's properly indented
-                leading_spaces = len(line) - len(line.lstrip(' '))
-                if leading_spaces != alignment_spaces:
-                    level = rule_config.get("level", "warning")
-                    message = rule_config.get("description", f"Hive DDL关键字应对齐，使用{alignment_spaces}个空格缩进")
-                    issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R702')}] {message}")
-                    break
-
-    return issues
-
-def _check_hive_external_table(parsed_sql, original_sql):
-    """检查Hive建表语句是否使用EXTERNAL关键字"""
-    issues = []
-    # Get configuration for this rule
-    rule_config = RULES_CONFIG["rules"].get("hive_external_table", {})
-
-    # Check if this is a CREATE TABLE statement
+    # Check for EXTERNAL keyword in CREATE TABLE statements
     if isinstance(parsed_sql, exp.Create) and parsed_sql.kind == "TABLE":
-        # Check if EXTERNAL keyword is present
-        if "EXTERNAL" not in original_sql.upper():
-            level = rule_config.get("level", "error")
-            message = rule_config.get("description", "Hive建表语句应使用EXTERNAL关键字创建外表")
-            issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R703')}] {message}")
+        if hive_external_rule.get("enabled", True) and "EXTERNAL" not in original_sql.upper():
+            level = hive_external_rule.get("level", "error")
+            message = hive_external_rule.get("description", "Hive建表语句应使用EXTERNAL关键字创建外表")
+            issues.append(f"[{level.capitalize()}-{hive_external_rule.get('id', 'R703')}] {message}")
+
+    # Check for uppercase keywords in DDL statements - using only config values, no hard-coded defaults
+    if hive_keyword_rule.get("enabled", False):  # Default to False if not specified
+        ddl_keywords = hive_keyword_rule.get("keywords", [])  # Empty list if not specified
+
+        # Only check if keywords are defined in config
+        if ddl_keywords:
+            for keyword in ddl_keywords:
+                # Look for uppercase versions of the keywords
+                pattern = r'\b' + keyword + r'\b'
+                if re.search(pattern, original_sql):
+                    level = hive_keyword_rule.get("level", "warning")
+                    message = hive_keyword_rule.get("description", f"Hive DDL关键字 '{keyword}' 应使用小写")
+                    issues.append(f"[{level.capitalize()}-{hive_keyword_rule.get('id', 'R701')}] {message}")
+
+    # Check for proper alignment in DDL statements - using only config values, no hard-coded defaults
+    if hive_alignment_rule.get("enabled", False):  # Default to False if not specified
+        alignment_spaces = hive_alignment_rule.get("alignment_spaces", 0)  # Default to 0 if not specified
+
+        # Only check if alignment_spaces is defined and greater than 0
+        if alignment_spaces > 0:
+            lines = original_sql.split('\n')
+            for line in lines:
+                # Check if line starts with a keyword that should be aligned
+                if line.strip().upper().startswith(('PARTITIONED', 'STORED', 'LOCATION', 'TBLPROPERTIES')):
+                    # Check if it's properly indented
+                    leading_spaces = len(line) - len(line.lstrip(' '))
+                    if leading_spaces != alignment_spaces:
+                        level = hive_alignment_rule.get("level", "warning")
+                        message = hive_alignment_rule.get("description", f"Hive DDL关键字应对齐，使用{alignment_spaces}个空格缩进")
+                        issues.append(f"[{level.capitalize()}-{hive_alignment_rule.get('id', 'R702')}] {message}")
+                        break
 
     return issues
 
