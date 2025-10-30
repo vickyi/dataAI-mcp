@@ -8,4 +8,4 @@ source venv/bin/activate  # Linux/Mac
 # venv\Scripts\activate  # Windows
 
 # 安装依赖
-pip install mcp pandas sqlglot # 使用sqlglot进行SQL语法解析
+pip install -r requirements.txt

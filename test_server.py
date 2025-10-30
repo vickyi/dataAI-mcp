@@ -1,16 +1,15 @@
 import asyncio
-from server import SQLintterMCPServer
+from mcp.server import FastMCP
+from server import lint_sql
 
 async def test():
-    server = SQLintterMCPServer()
-
     # 测试有问题的SQL
     bad_sql = """
     SELECT * FROM ods_user
     WHERE status = 1
     """
 
-    result = await server.lint_sql(bad_sql)
+    result = await lint_sql(bad_sql)
     print("=== 问题SQL检查结果 ===")
     print(result)
     print()
@@ -28,7 +27,7 @@ async def test():
     GROUP BY u.user_id, u.user_name
     """
 
-    result = await server.lint_sql(good_sql)
+    result = await lint_sql(good_sql)
     print("=== 规范SQL检查结果 ===")
     print(result)
 
