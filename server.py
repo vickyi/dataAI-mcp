@@ -60,6 +60,12 @@ async def lint_sql(sql_string: str) -> str:
         rules.append(_check_join_conditions)
     if RULES_CONFIG["rules"].get("query_complexity", {}).get("enabled", False):
         rules.append(_check_query_complexity)
+    if RULES_CONFIG["rules"].get("hive_ddl_keywords", {}).get("enabled", True):
+        rules.append(_check_hive_ddl_keywords)
+    if RULES_CONFIG["rules"].get("hive_ddl_alignment", {}).get("enabled", True):
+        rules.append(_check_hive_ddl_alignment)
+    if RULES_CONFIG["rules"].get("hive_external_table", {}).get("enabled", True):
+        rules.append(_check_hive_external_table)
 
     try:
         # 1. 使用sqlglot解析SQL
@@ -228,6 +234,75 @@ def _check_query_complexity(parsed_sql, original_sql):
         level = rule_config.get("level", "warning")
         message = rule_config.get("description", f"查询涉及 {table_count} 个表，超过最大限制 {max_tables}。")
         issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R501')}] {message}")
+
+    return issues
+
+def _check_hive_ddl_keywords(parsed_sql, original_sql):
+    """检查Hive DDL关键字规范（小写）"""
+    issues = []
+    # Get configuration for this rule
+    rule_config = RULES_CONFIG["rules"].get("hive_ddl_keywords", {})
+
+    # Check if this is a CREATE statement
+    if isinstance(parsed_sql, exp.Create):
+        # Get the keywords that should be lowercase
+        keywords = rule_config.get("keywords", [
+            "CREATE", "TABLE", "EXTERNAL", "PARTITIONED", "STORED", "LOCATION",
+            "ROW", "FORMAT", "FIELDS", "TERMINATED", "COLLECTION", "ITEMS",
+            "KEYS", "LINES", "TBLPROPERTIES"
+        ])
+
+        # Check the original SQL for uppercase keywords
+        for keyword in keywords:
+            # Look for uppercase versions of the keywords that are not properly quoted
+            # We use word boundaries to avoid false positives
+            pattern = r'\b' + keyword + r'\b'
+            if re.search(pattern, original_sql):
+                level = rule_config.get("level", "warning")
+                message = rule_config.get("description", f"Hive DDL关键字 '{keyword}' 应使用小写")
+                issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R701')}] {message}")
+
+    return issues
+
+def _check_hive_ddl_alignment(parsed_sql, original_sql):
+    """检查Hive DDL关键字对齐"""
+    issues = []
+    # Get configuration for this rule
+    rule_config = RULES_CONFIG["rules"].get("hive_ddl_alignment", {})
+
+    # Check if this is a CREATE statement
+    if isinstance(parsed_sql, exp.Create):
+        # Get the required alignment spaces
+        alignment_spaces = rule_config.get("alignment_spaces", 4)
+
+        # Simple check for alignment by looking at common patterns
+        lines = original_sql.split('\n')
+        for line in lines:
+            # Check if line starts with a keyword that should be aligned
+            if line.strip().upper().startswith(('PARTITIONED', 'STORED', 'LOCATION', 'TBLPROPERTIES')):
+                # Check if it's properly indented
+                leading_spaces = len(line) - len(line.lstrip(' '))
+                if leading_spaces != alignment_spaces:
+                    level = rule_config.get("level", "warning")
+                    message = rule_config.get("description", f"Hive DDL关键字应对齐，使用{alignment_spaces}个空格缩进")
+                    issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R702')}] {message}")
+                    break
+
+    return issues
+
+def _check_hive_external_table(parsed_sql, original_sql):
+    """检查Hive建表语句是否使用EXTERNAL关键字"""
+    issues = []
+    # Get configuration for this rule
+    rule_config = RULES_CONFIG["rules"].get("hive_external_table", {})
+
+    # Check if this is a CREATE TABLE statement
+    if isinstance(parsed_sql, exp.Create) and parsed_sql.kind == "TABLE":
+        # Check if EXTERNAL keyword is present
+        if "EXTERNAL" not in original_sql.upper():
+            level = rule_config.get("level", "error")
+            message = rule_config.get("description", "Hive建表语句应使用EXTERNAL关键字创建外表")
+            issues.append(f"[{level.capitalize()}-{rule_config.get('id', 'R703')}] {message}")
 
     return issues
 

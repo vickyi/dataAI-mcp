@@ -69,3 +69,26 @@ description = "查询复杂度过高，建议简化"
 max_joins = 5
 max_subqueries = 3
 max_tables = 10
+
+# 新增的Hive建表规则
+[rules.hive_ddl_keywords]
+# Hive DDL关键字规范检查
+id = "R701"
+enabled = true
+level = "warning"
+description = "Hive建表语句关键字应使用小写"
+
+[rules.hive_ddl_alignment]
+# Hive DDL关键字对齐检查
+id = "R702"
+enabled = true
+level = "warning"
+description = "Hive建表语句关键字应对齐"
+alignment_spaces = 4
+
+[rules.hive_external_table]
+# Hive外表检查
+id = "R703"
+enabled = true
+level = "error"
+description = "Hive建表语句应使用EXTERNAL关键字创建外表"

@@ -45,15 +45,7 @@ sensitive_keywords = [
     "credit_card",
     "ssn",
     "bank_account",
-    "money",
-    "salary",
-    "phone_encrypt",
-    "encrypt_phone",
-    "identity_number_encrypt",
-    "cred_id_encrypted",
-    "cred_id",
-    "account",
-    "drive_license_no"
+    "salary"
 ]
 
 [rules.field_alias_naming]
@@ -88,3 +80,31 @@ id = "R601"
 enabled = false  # 默认不启用
 level = "warning"
 description = "WHERE子句中的字段建议有索引"
+
+# 新增的Hive建表规则
+[rules.hive_ddl_keywords]
+# Hive DDL关键字规范检查
+id = "R701"
+enabled = true
+level = "warning"
+description = "Hive建表语句关键字应使用小写"
+keywords = [
+    "CREATE", "TABLE", "EXTERNAL", "PARTITIONED", "STORED", "LOCATION",
+    "ROW", "FORMAT", "FIELDS", "TERMINATED", "COLLECTION", "ITEMS",
+    "KEYS", "LINES", "TBLPROPERTIES"
+]
+
+[rules.hive_ddl_alignment]
+# Hive DDL关键字对齐检查
+id = "R702"
+enabled = true
+level = "warning"
+description = "Hive建表语句关键字应对齐"
+alignment_spaces = 4
+
+[rules.hive_external_table]
+# Hive外表检查
+id = "R703"
+enabled = true
+level = "error"
+description = "Hive建表语句应使用EXTERNAL关键字创建外表"
