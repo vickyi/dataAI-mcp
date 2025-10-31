@@ -259,5 +259,5 @@ def _camel_to_snake(name):
     return re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
 
 if __name__ == "__main__":
-    # 使用标准输入输出运行服务器，这是MCP协议的要求
-    app.run()
+    # 使用 SSE 传输方式运行服务器，避免 Windows 环境下的 stdio 通信问题
+    app.run(transport="sse")
