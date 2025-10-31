@@ -56,6 +56,9 @@ class SQLAssistantAgent:
         请用中文与用户交流，生成的SQL代码要可以直接执行。
         """
 
+        # 添加任务取消支持
+        self.current_task = None
+
     async def _call_deepseek_api(self, messages: list, temperature: float = 0.1) -> str:
         """
         调用DeepSeek API
@@ -81,6 +84,7 @@ class SQLAssistantAgent:
         }
 
         try:
+            # 创建一个可取消的请求任务
             response = requests.post(self.base_url, headers=headers, json=payload, timeout=30)
             response.raise_for_status()
 
@@ -94,6 +98,8 @@ class SQLAssistantAgent:
 
     async def generate_and_review_sql(self, user_request: str) -> str:
         """生成并审核SQL的核心方法"""
+        # 保存当前任务引用以便取消
+        self.current_task = asyncio.current_task()
 
         # 1. 首先生成初始SQL
         print("🤖 正在理解您的需求并生成SQL...")
@@ -118,7 +124,7 @@ class SQLAssistantAgent:
                 # Call the lint function directly instead of using MCP client
                 final_check = await lint_sql(optimized_sql)
                 if "符合所有规范" in final_check:
-                    result = f"✅ 已为您生成符合规范的SQL：\n```sql\n{optimized_sql}\n```\n\n💡 **优化说明**: 根据规范检查结果，我对SQL进行了优化，确保其符合大数据开发标准。"
+                    result = f"✅ 已为您生成符合规范的SQL：\n``sql\n{optimized_sql}\n```\n\n💡 **优化说明**: 根据规范检查结果，我对SQL进行了优化，确保其符合大数据开发标准。"
                 else:
                     result = f"🔄 已优化SQL，但仍存在一些建议：\n```sql\n{optimized_sql}\n```\n\n📋 **检查结果**:\n{final_check}"
             else:
@@ -209,6 +215,17 @@ class SQLAssistantAgent:
         # 直接返回清理后的响应
         return cleaned_response
 
+    async def cancel_current_task(self):
+        """取消当前任务"""
+        if self.current_task and not self.current_task.done():
+            self.current_task.cancel()
+            try:
+                await self.current_task
+            except asyncio.CancelledError:
+                print("任务已成功取消")
+                # 根据 SonarQube 规则 python:S7497，需要重新抛出 CancelledError
+                raise
+        return "当前没有正在运行的任务"
 
     async def chat(self, message: str) -> str:
         """
