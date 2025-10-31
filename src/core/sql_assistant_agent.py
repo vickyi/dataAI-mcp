@@ -4,9 +4,9 @@ import asyncio
 import os
 from typing import Optional
 # Import the lint function directly from the server module
-from server import lint_sql
+from .server import lint_sql
 # 导入配置
-from config import config, setup_environment
+from .config import config, setup_environment
 
 class SQLAssistantAgent:
     def __init__(self, deepseek_api_key: Optional[str] = None):

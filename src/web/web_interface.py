@@ -1,6 +1,6 @@
 # web_interface.py
 import gradio as gr
-from sql_assistant_agent import SQLAssistantAgent
+from ..core.sql_assistant_agent import SQLAssistantAgent
 import sys
 import os
 import asyncio

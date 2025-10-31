@@ -12,25 +12,53 @@ app = FastMCP("sql-linter-mcp-server")
 # Load rules from TOML configuration
 def load_rules_config() -> Dict[str, Any]:
     """Load SQL rules configuration from TOML file"""
-    config_path = os.path.join(os.path.dirname(__file__), 'sql_rules.toml')
+    # 使用绝对路径确保能正确找到配置文件
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(current_dir, '..', 'rules', 'sql_rules.toml')
+    config_path = os.path.abspath(config_path)  # 转换为绝对路径
+
+    print(f"尝试加载配置文件: {config_path}")
+    print(f"配置文件是否存在: {os.path.exists(config_path)}")
+
     if os.path.exists(config_path):
-        with open(config_path, 'r', encoding='utf-8') as f:
-            return toml.load(f)
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = toml.load(f)
+                print(f"成功加载配置: {list(config.keys())}")
+                return config
+        except Exception as e:
+            print(f"加载配置文件时出错: {e}")
+            # 返回默认配置
+            return get_default_config()
     else:
+        print(f"配置文件不存在，使用默认配置")
         # Return default configuration if file doesn't exist
-        return {
-            "rules": {
-                "select_star": {"enabled": True, "level": "error", "exclude_functions": ["COUNT"]},
-                "partition_filter": {"enabled": True, "level": "error", "partition_fields": ["dt", "date"]},
-                "table_alias": {"enabled": True, "level": "warning"},
-                "sensitive_columns": {"enabled": True, "level": "error", "sensitive_keywords": [
-                    "phone", "email", "id_card", "password", "credit_card"]},
-                "field_alias_naming": {"enabled": True, "level": "warning"}
-            }
+        return get_default_config()
+
+def get_default_config() -> Dict[str, Any]:
+    """获取默认配置"""
+    return {
+        "general": {
+            "sql_dialect": "hive",
+            "enabled": True
+        },
+        "rules": {
+            "select_star": {"enabled": True, "level": "error", "exclude_functions": ["COUNT"]},
+            "partition_filter": {"enabled": True, "level": "error", "partition_fields": ["dt", "date"]},
+            "table_alias": {"enabled": True, "level": "warning"},
+            "sensitive_columns": {"enabled": True, "level": "error", "sensitive_keywords": [
+                "phone", "email", "id_card", "password", "credit_card"]},
+            "field_alias_naming": {"enabled": True, "level": "warning"}
         }
+    }
 
 # Load the rules configuration
-RULES_CONFIG = load_rules_config()
+try:
+    RULES_CONFIG = load_rules_config()
+    print(f"规则配置加载成功: {RULES_CONFIG.get('general', {})}")
+except Exception as e:
+    print(f"加载规则配置时发生错误: {e}")
+    RULES_CONFIG = get_default_config()
 
 @app.tool()
 async def lint_sql(sql_string: str) -> str:

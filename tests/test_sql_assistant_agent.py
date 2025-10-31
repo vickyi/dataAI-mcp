@@ -2,11 +2,13 @@
 import asyncio
 import sys
 import os
-from sql_assistant_agent import SQLAssistantAgent
-from config import setup_environment
 
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+# 从新的位置导入
+from src.core.sql_assistant_agent import SQLAssistantAgent
+from src.core.config import setup_environment
 
 async def main():
     # 启动MCP服务器（在实际中，这应该是一个独立的进程）
