@@ -4,4 +4,4 @@ python-dotenv
 aiohttp
 sqlglot
 pandas
-toml
+pymysql
